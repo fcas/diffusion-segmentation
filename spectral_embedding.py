@@ -171,12 +171,13 @@ def best_k_means(k, maps, adjacency, n_bst=10):
     for _ in range(n_bst):
         print "doing kmeans"
         _, labels, _ = _kmeans(maps, nbclusters=k)
-        #score = q_score(adjacency, labels)
+        score2 = q_score(adjacency, labels)
         score = n_cut(adjacency, labels)
         if score > best_score:
             best_score = score
+            best_score2 = score2
             best_labels = labels
-    return best_labels, best_score
+    return best_labels, best_score2 #best_score
 
 
 def communities_clustering(adjacency, k_best=None, n_bst=2):
@@ -219,10 +220,72 @@ def communities_clustering_sparse(adjacency, k_best=None, k_min=2, k_max=8, n_bs
         print 'Final : k=%i, score=%s' % (k_best, scores)
     return res, scores
 
-def separate_in_regions(data, mask, k_best=None, k_min=2, k_max=8, \
+def separate_in_regions(data, mask=None, k_best=None, k_min=2, k_max=8, \
                                 center=None, only_connex=True, n_times=4,\
                                 take_first=True, beta=10, mode='bf'):
-    labs, nb_labels = ndimage.label(mask)
+    """
+    Separate an image in different regions, using spectral clustering.
+
+    Parameters
+    ----------
+
+    data: array
+        Image to be segmented in regions. `data` can be two- or
+        three-dimensional.
+
+    mask: array, optional
+        Mask of the pixels to be clustered. If mask is None, all pixels
+        are clustered.
+
+    k_best: int, optional
+        number of clusters to be found. If k_best is None, the clustering
+        is performed for a range of numbers given by k_min and k_max.
+
+    k_min: int, optional
+        minimum number of clusters 
+
+    k_max: int, optional
+        maximum number of clusters
+
+    center: tuple-like, optional
+        coordinates of a point included in the connected component to be
+        segmented, if there are several connected components.
+
+    only_connex: boolean, optional
+        whether to return only the segmentation of the principal connected 
+        component or the (non-clustered) other components as well.
+
+    n_times: int, optional
+        how many times the k_means clustering is performed for each k
+
+    take_first: boolean, optional
+        whether to take the first eigenmode (of eigenvalue 0) for the clustering
+        or not. One should not take it for k=2, but I get better results with it
+        for k >= 4 in my images.
+
+    beta: float, optional
+        normalization parameter used to compute the weight of a link. The greater
+        beta, the more gradients are penalized.
+
+    mode: str, {'bf', 'amg'}
+        how the eigenmode of the spectral embedding are computed. 'bf' uses 
+        arpack, and 'amg' pyamg (multigrid methods). 'amg' should be much faster.
+
+    Returns
+    -------
+
+    labels: array or dict with array values
+        result of clustering. If k_best is None, a dict is return and 
+        label[k] is the clustering in k clusters, for k_min <= k <= k_max
+
+    scores: int or dict with int values
+    """
+    if mask is not None:
+        labs, nb_labels = ndimage.label(mask)
+    else:
+        mask = np.ones_like(data).astype(bool)
+        nb_labels = 1
+    mask = np.atleast_3d(mask)
     if nb_labels > 1:
         if center is None:
             sizes = np.array(ndimage.sum(mask, labs, range(1, nb_labels + 1)))
@@ -230,12 +293,13 @@ def separate_in_regions(data, mask, k_best=None, k_min=2, k_max=8, \
         else:
             ind_max = labs[tuple(center)]
         mask = labs == ind_max
-    lap, w = _build_laplacian(np.atleast_3d(data), mask=np.atleast_3d(mask), \
+    lap, w = _build_laplacian(np.atleast_3d(data), mask=mask, \
                 normed=True, beta=beta)
     print lap.shape
     res, scores = communities_clustering_sparse(lap, k_best=k_best, \
                     k_min=k_min, k_max=k_max, n_bst=n_times, \
                     take_first=take_first, mode=mode)
+    mask = np.squeeze(mask)
     if not only_connex:
         if k_best==None:
             labels = dict()
